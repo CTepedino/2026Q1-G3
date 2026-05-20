@@ -110,10 +110,6 @@ cd ./terraform
 ```
 
 ```bash
-terraform init
-```
-
-```bash
 terraform apply
 ```
 
