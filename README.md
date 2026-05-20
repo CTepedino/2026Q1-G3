@@ -11,6 +11,31 @@ Además, se recompilan datos de interacción que se usan para analitica y entren
 
 ![Diagrama de arquitectura AWS](./Architecture.png)
 
+## Quick Start
+
+Requiere: AWS CLI configurado, Terraform ≥ 1.8.5, Docker, JDK 21 + Maven 3.9+, Node.js 20 LTS.
+
+El repositorio incluye un `terraform/terraform.tfvars` con valores por defecto listos para usar. No es necesario modificarlo para levantar la aplicación.
+
+```bash
+# Solo la primera vez: crea el bucket S3 y tabla DynamoDB para el estado remoto
+bash terraform/scripts/terraform-init-remote.sh
+
+# Deploy completo: Lambdas → terraform apply → backend → frontends
+bash terraform/scripts/deploy.sh
+```
+
+Al finalizar, las URLs de los frontends quedan impresas en la terminal. También se pueden consultar con:
+
+```bash
+terraform output frontend_admin_website_url
+terraform output frontend_menu_website_url
+```
+
+Ver [Instrucciones de Prueba](#instrucciones-de-prueba) para el flujo de uso una vez desplegado.
+
+> Para correr los pasos por separado o más detalles sobre cada script, ver [Instrucciones de Ejecución](#instrucciones-de-ejecución).
+
 ## Requerimientos
 
 Despliegue en **AWS** desde Linux, macOS o [WSL 2](https://learn.microsoft.com/es-es/windows/wsl/install) en Windows. Los scripts usan `bash`.
@@ -111,6 +136,7 @@ bash terraform/scripts/deploy-frontends.sh
 bash terraform/scripts/terraform-init-remote.sh   # solo la primera vez
 bash terraform/scripts/deploy.sh
 ```
+
 ### Outputs útiles
 
 ```bash
@@ -139,25 +165,44 @@ Por este motivo, Terraform se utiliza únicamente para crear y configurar la inf
 
 ## Instrucciones de Prueba
 
-Tras ejecutar los scripts de deploy de backend y frontends, las URL de los mismos se veran en la terminal.
-En primer lugar, se debe ingresar a la pagina de admin y crear un usuario.
-En caso de querer
-Al crearlo, se pueden cargar platos del menu, ver ordenes, o cargar mesas.
-Al cargar una mesa se obtiene un QR dirigido a la pagina del Menu desde donde se pueden ver los platos disponibles e iniciar una orden
+### Flujo principal
 
-El entrenamiento de modelos es responsabilidad de las lambdas.
-Se usa EventBridge para llamar a una Lambda orquestadora según un CRON ,el cual se define como variable en terraform, pero por defecto es de 1 vez por dia.
-Alternativamente, se puede ejecutar manualmente la Lambda. Esta Lambda se encarga de obtener todos los tenants de la rds y enviar un request por tenant a un SQS para que le llegue a la otra Lambda,
-la que se encarga de usar las metricas de ese tenant para entrenar un modelo de recomendaciones de platos.
-Los modelos se guardan en S3, y los usa el backend para dar recomendaciones de platos.
+**Desde la consola de admin** (`frontend_admin_website_url`):
 
-Cabe aclarar que, en caso de no tener cargado un modelo aún, el backend genera recomendaciones aleatorias.
-Asimismo, si un modelo se entrena apenas se levanta la aplicación, no habra datos suficientes para que el modelo pueda ser util. Aun así, el modelo será generado y almacenado en el bucket correspondiente.
+1. **Registrar una cuenta** — Crear un nuevo usuario para el restaurante.
+2. **Crear una mesa** — En la sección de mesas, agregar una nueva. Al crearla se genera un código QR que apunta a la URL del menú para esa mesa.
+3. **Crear un menú** — Desde el panel de admin, crear un menú para el restaurante.
+4. **Agregar una sección** — Dentro del menú, crear al menos una sección (ej: "Entradas", "Platos principales", "Bebidas").
+5. **Agregar platos** — Agregar platos a cada sección con nombre, descripción y precio.
 
-Las recomendaciones se muestran en el modal que se ve antes de confirmar la orden.
+**Desde la interfaz de cliente** (`frontend_menu_website_url`, o escaneando el QR de la mesa):
 
-Se puede invocar la Lambda orquestradora fuera del momento del cron para verificar la carga de modelos usando la consola de AWS
+6. **Hacer un pedido** — Navegar el menú, agregar platos al carrito y confirmar la orden. Antes de confirmar se muestran recomendaciones personalizadas (o aleatorias si no hay modelo entrenado aún).
 
+**De vuelta en la consola de admin**:
+
+7. **Actualizar el estado del pedido** — En la sección de órdenes, ir cambiando el estado del pedido (ej: recibido → en preparación → listo).
+8. **Recibir solicitud de cuenta** — El cliente puede marcar "pedir la cuenta" desde la interfaz de usuario; esto se refleja en la consola de admin.
+9. **Cerrar el pedido** — Marcar el pedido como cerrado desde la consola de admin. El cobro queda a cargo del negocio por sus propios medios (el sistema no gestiona pagos).
+
+### Dashboard de analytics
+
+1. **Abrir el dashboard** — Desde la consola de admin, navegar a la sección de analytics.
+2. **Ver métricas de pedidos** — Explorar las analíticas de los últimos pedidos: platos más pedidos, tendencias por período, etc.
+
+> Para que el dashboard tenga datos relevantes, conviene haber generado varios pedidos con distintos platos antes de abrirlo.
+
+### Modelos de recomendación (ML)
+
+El entrenamiento de modelos es responsabilidad de las Lambdas. Se usa EventBridge para invocar una Lambda orquestadora según un CRON (configurable como variable en Terraform; por defecto, una vez por día).
+
+La Lambda orquestadora obtiene todos los tenants de la RDS y encola un mensaje por tenant en SQS. Una segunda Lambda consume la cola y entrena un modelo de recomendaciones de platos por tenant. Los modelos se guardan en S3 y el backend los usa para dar recomendaciones.
+
+> Si no hay modelo entrenado aún, el backend genera recomendaciones aleatorias. Si el modelo se entrena inmediatamente tras levantar la aplicación, puede no haber datos suficientes para que sea útil, pero el modelo se generará y almacenará correctamente.
+
+Las recomendaciones se muestran en el modal que aparece antes de confirmar la orden.
+
+Para invocar la Lambda orquestadora manualmente (fuera del CRON) y verificar la carga de modelos:
 
 ```bash
 aws lambda invoke \
