@@ -194,7 +194,7 @@ jobs:
               exit 0
             fi
 
-            if [ "${TARGET_STATE}" = "UNAVAILABLE" ] && [ "${TARGET_REASON}" != "PENDING_PROXY_CAPACITY" ]; then
+            if [ "${TARGET_STATE}" = "UNAVAILABLE" ] && [ "${TARGET_REASON}" != "PENDING_PROXY_CAPACITY" ] && [ "${TARGET_REASON}" != "None" ]; then
               TARGET_DESC="$(aws rds describe-db-proxy-targets \
                 --db-proxy-name "${PROXY_NAME}" \
                 --region "${AWS_REGION}" \
